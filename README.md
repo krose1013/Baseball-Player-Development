@@ -7,7 +7,7 @@ An interactive, player-facing analytics dashboard built to translate optical pit
 ##  Live Demo & Links
 
 - **Live Interactive Dashboard:** [Deploy Your Streamlit App Link Here](https://your-app-name.streamlit.app)
-- **GitHub Repository:** [https://github.com/YOUR_GITHUB_USERNAME/baseball-coaching-report](https://github.com/YOUR_GITHUB_USERNAME/baseball-coaching-report)
+- **GitHub Repository:** [https://github.com/krose1013/Baseball-Player-Development.git](https://github.com/krose1013/Baseball-Player-Development.git)
 
 ---
 
