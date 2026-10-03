@@ -84,30 +84,42 @@ def generate_pitcher_data(player_name, num_pitches=250):
             'SpinRate': int(spin)
         })
     return pd.DataFrame(data)
-
-def generate_hitter_data(player_name, num_pitches=300):
-    seed_val = sum(ord(c) for c in player_name) + 100
-    np.random.seed(seed_val)
+#Generate hitting data
+def generate_hitter_data(player_name, num_pitches=250):
+    np.random.seed(hash(player_name) % 1000)
     
-    zones = list(range(1, 10)) + [11, 12, 13, 14]
+    zones = list(range(1, 10)) + [11, 12, 13, 14]  # 1-9 in-zone, 11-14 chase
+    pitch_types = ["4-Seam", "Sinker", "Slider", "Changeup", "Sweeper", "Curveball"]
+    
     data = []
-    
     for _ in range(num_pitches):
-        zone = np.random.choice(zones)
-        in_zone = zone in range(1, 10)
-        swing_prob = 0.70 if in_zone else 0.29
-        is_swing = np.random.rand() < swing_prob
+        zone = np.random.choice(zones, p=[0.08]*9 + [0.07]*4)
+        pitch_type = np.random.choice(pitch_types)
         
-        exit_velocity = 0.0
-        if is_swing and np.random.rand() < 0.75:
-            exit_velocity = np.random.normal(91, 6) if in_zone else np.random.normal(81, 8)
+        # Determine swing/whiff/contact
+        is_swing = np.random.choice([True, False], p=[0.55, 0.45]) if zone in range(1, 10) else np.random.choice([True, False], p=[0.25, 0.75])
         
+        is_whiff = False
+        exit_velo = np.nan
+        launch_angle = np.nan
+        is_hard_hit = False
+        
+        if is_swing:
+            is_whiff = np.random.choice([True, False], p=[0.22, 0.78])
+            if not is_whiff:  # Contact made
+                exit_velo = np.round(np.random.normal(88.5, 8.0), 1)
+                launch_angle = np.round(np.random.normal(14.0, 12.0), 1)
+                is_hard_hit = exit_velo >= 95.0
+                
         data.append({
-            'Player': player_name,
-            'Zone': zone,
-            'InZone': in_zone,
-            'IsSwing': is_swing,
-            'ExitVelocity': max(0.0, np.round(exit_velocity, 1)),
-            'IsHardHit': exit_velocity >= 95.0
+            "Player": player_name,
+            "Zone": zone,
+            "PitchType": pitch_type,
+            "IsSwing": is_swing,
+            "IsWhiff": is_whiff,
+            "ExitVelo": exit_velo,
+            "LaunchAngle": launch_angle,
+            "IsHardHit": is_hard_hit
         })
+        
     return pd.DataFrame(data)
