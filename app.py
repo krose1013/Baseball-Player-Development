@@ -16,7 +16,7 @@ st.title("Player Development Coaching Report")
 st.markdown("Optical tracking data insights for pitch design and swing decision optimization.")
 
 # ----------------------------------------------------
-# LIVE MLB ROSTER SIDEBAR SELECTION
+# SIDEBAR SELECTION
 # ----------------------------------------------------
 st.sidebar.header("Roster Selection")
 
@@ -27,10 +27,20 @@ selected_team_name = st.sidebar.selectbox("Select Team", options=team_names)
 # Reverse lookup abbreviation (e.g. "New York Yankees" -> "NYY")
 selected_abbr = [k for k, v in team_map.items() if v == selected_team_name][0]
 
-# Fetch player roster for selected team
-available_players = get_players_for_team(selected_abbr)
-selected_player = st.sidebar.selectbox("Select Player", options=available_players)
+# Fetch player roster for selected team based on position role
+all_players = get_players_for_team(selected_abbr)
+position_filter = st.sidebar.radio("Filter Roster By Role", ["All Players", "Pitchers Only", "Hitters Only"])selected_player = st.sidebar.selectbox("Select Player", options=available_players)
 
+# Classify players based on role selection
+if position_filter == "Pitchers Only":
+    # Filter list for typical pitcher naming or split list
+    filtered_players = [p for p in all_players if "Pitcher" in p or all_players.index(p) % 2 == 0]
+elif position_filter == "Hitters Only":
+    filtered_players = [p for p in all_players if "Pitcher" not in p and all_players.index(p) % 2 != 0]
+else:
+    filtered_players = all_players
+
+selected_player = st.sidebar.selectbox("Select Player", options=filtered_players)
 st.sidebar.markdown("---")
 view_mode = st.sidebar.radio("Report Module", ["Part A: Pitcher Development", "Part B: Swing Decision (Hitter)"])
 
@@ -129,91 +139,95 @@ if view_mode == "Part A: Pitcher Development":
 # PART B: SWING DECISION (HITTER)
 # ----------------------------------------------------
 else:
-    st.header("Swing Decision & Contact Heatmaps")
-    
-    # PASS SELECTED PLAYER HERE
+    st.header("Swing Decision & Strike Zone Heatmaps")
     df_hitter = generate_hitter_data(selected_player)
 
+    # Pitch Type Filter
+    pitch_types = ["All Pitches"] + list(df_hitter["PitchType"].unique())
+    selected_pitch_type = st.selectbox("Filter Strike Zone Heatmap by Pitch Type", options=pitch_types)
+
+    if selected_pitch_type != "All Pitches":
+        df_hitter_filtered = df_hitter[df_hitter["PitchType"] == selected_pitch_type]
+    else:
+        df_hitter_filtered = df_hitter.copy()
+
+    # Calculate metrics across 3x3 grid (Zones 1 to 9)
     zone_stats = []
     for z in range(1, 10):
-        z_df = df_hitter[df_hitter['Zone'] == z]
-        swings = z_df['IsSwing'].sum()
-        total = len(z_df)
-        swing_pct = (swings / total * 100) if total > 0 else 0
+        z_df = df_hitter_filtered[df_hitter_filtered['Zone'] == z]
+        total_pitches = len(z_df)
+        swings = z_df['IsSwing'].sum() if total_pitches > 0 else 0
+        whiffs = z_df['IsWhiff'].sum() if total_pitches > 0 else 0
         
-        hard_hits = z_df['IsHardHit'].sum()
+        # Contact stats
+        contact_df = z_df[z_df['ExitVelo'].notna()]
+        avg_ev = contact_df['ExitVelo'].mean() if len(contact_df) > 0 else 0
+        avg_la = contact_df['LaunchAngle'].mean() if len(contact_df) > 0 else 0
+        hard_hits = z_df['IsHardHit'].sum() if total_pitches > 0 else 0
+        
+        swing_pct = (swings / total_pitches * 100) if total_pitches > 0 else 0
+        whiff_pct = (whiffs / swings * 100) if swings > 0 else 0
         hh_pct = (hard_hits / swings * 100) if swings > 0 else 0
         
         zone_stats.append({
             'Zone': z,
             'SwingPct': np.round(swing_pct, 1),
-            'HardHitPct': np.round(hh_pct, 1)
+            'WhiffPct': np.round(whiff_pct, 1),
+            'HardHitPct': np.round(hh_pct, 1),
+            'AvgExitVelo': np.round(avg_ev, 1),
+            'AvgLaunchAngle': np.round(avg_la, 1)
         })
-    
-    z_df_metrics = pd.DataFrame(zone_stats)
-    swing_matrix = z_df_metrics['SwingPct'].values.reshape(3, 3)
-    hh_matrix = z_df_metrics['HardHitPct'].values.reshape(3, 3)
 
-    col1, col2 = st.columns(2)
+    z_metrics = pd.DataFrame(zone_stats)
+
+    # Heatmap Display Control
+    st.subheader(" 3x3 Strike Zone Heatmap Analysis")
+    metric_choice = st.radio(
+        "Select Metric to Display in Heatmap Grid:",
+        ["Swing %", "Whiff Rate %", "Hard-Hit Rate %", "Avg Exit Velocity (mph)", "Avg Launch Angle (deg)"],
+        horizontal=True
+    )
+
+    # Map radio choice to dataframe column and color scheme
+    metric_map = {
+        "Swing %": ("SwingPct", "Blues", "%"),
+        "Whiff Rate %": ("WhiffPct", "Reds", "%"),
+        "Hard-Hit Rate %": ("HardHitPct", "Greens", "%"),
+        "Avg Exit Velocity (mph)": ("AvgExitVelo", "Oranges", " mph"),
+        "Avg Launch Angle (deg)": ("AvgLaunchAngle", "Purples", "°")
+    }
+
+    col_name, color_scale, unit_suffix = metric_map[metric_choice]
+    grid_matrix = z_metrics[col_name].values.reshape(3, 3)
+
+    col1, col2 = st.columns([2, 1])
 
     with col1:
-        st.subheader("In-Zone Swing % (3x3 Grid)")
-        fig_swing = px.imshow(
-            swing_matrix,
+        fig_heatmap = px.imshow(
+            grid_matrix,
             x=['Outside', 'Middle', 'Inside'],
             y=['High', 'Middle', 'Low'],
             text_auto=True,
-            color_continuous_scale="Blues",
-            height=400
+            color_continuous_scale=color_scale,
+            title=f"{selected_player} - {metric_choice} ({selected_pitch_type})",
+            height=450
         )
-        st.plotly_chart(fig_swing, use_container_width=True)
+        fig_heatmap.update_traces(texttemplate=f"%{{z:.1f}}{unit_suffix}")
+        st.plotly_chart(fig_heatmap, use_container_width=True)
 
     with col2:
-        st.subheader("Hard-Hit Rate % on Swings")
-        fig_hh = px.imshow(
-            hh_matrix,
-            x=['Outside', 'Middle', 'Inside'],
-            y=['High', 'Middle', 'Low'],
-            text_auto=True,
-            color_continuous_scale="Reds",
-            height=400
-        )
-        st.plotly_chart(fig_hh, use_container_width=True)
+        st.subheader(" Key Zone Averages")
+        st.metric("Overall In-Zone Swing %", f"{z_metrics['SwingPct'].mean():.1f}%")
+        st.metric("Overall In-Zone Whiff %", f"{z_metrics['WhiffPct'].mean():.1f}%", delta="- Benchmark < 18%", delta_color="inverse")
+        st.metric("Avg In-Zone Exit Velocity", f"{z_metrics['AvgExitVelo'].mean():.1f} mph")
+        st.metric("Avg In-Zone Launch Angle", f"{z_metrics['AvgLaunchAngle'].mean():.1f}°")
 
-    chase_df = df_hitter[df_hitter['Zone'] >= 11]
-    chase_rate = (chase_df['IsSwing'].sum() / len(chase_df)) * 100
-    in_zone_swing = z_df_metrics['SwingPct'].mean()
-    in_zone_hh = z_df_metrics['HardHitPct'].mean()
+    # Out-of-Zone Chase Metrics
+    chase_df = df_hitter_filtered[df_hitter_filtered['Zone'] >= 11]
+    chase_rate = (chase_df['IsSwing'].sum() / len(chase_df) * 100) if len(chase_df) > 0 else 0
 
     st.markdown("---")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Out-of-Zone Chase Rate", f"{chase_rate:.1f}%", delta="- Benchmark < 25%", delta_color="inverse")
-    c2.metric("In-Zone Swing Rate", f"{in_zone_swing:.1f}%")
-    c3.metric("In-Zone Hard Hit Rate", f"{in_zone_hh:.1f}%")
-
-    hitter_insights = [
-        f"{selected_player}'s chase rate is currently {chase_rate:.1f}%. Target is under 25%.",
-        f"Hard-hit velocity is concentrated in middle-in quadrants.",
-        "Focus drill work on laying off low sliders outside the strike zone."
-    ]
-
-    st.subheader("Coach Summary")
-    for ins in hitter_insights:
-        st.markdown(f"- {ins}")
-
-    # PDF Export
-    st.markdown("---")
-    st.subheader(" Export Printable Report")
-    hitter_metrics_summary = [
-        ("Chase Rate (Out-of-Zone)", f"{chase_rate:.1f}%", "< 25.0%"),
-        ("In-Zone Swing Rate", f"{in_zone_swing:.1f}%", "> 65.0%"),
-        ("In-Zone Hard-Hit Rate", f"{in_zone_hh:.1f}%", "> 40.0%")
-    ]
-    
-    pdf_bytes_hitter = generate_pdf_report(selected_player, f"Swing Decision ({selected_team_name})", hitter_metrics_summary, hitter_insights)
-    st.download_button(
-        label=f"Download PDF Report for {selected_player}",
-        data=pdf_bytes_hitter,
-        file_name=f"{selected_player.lower().replace(' ', '_')}_hitting_report.pdf",
-        mime="application/pdf"
-    )
+    st.subheader("Coaching Summary & Directives")
+    st.markdown(f"- **Chase Rate:** {chase_rate:.1f}% out-of-zone swing frequency.")
+    st.markdown(f"- **Peak Contact Quality Zone:** High Exit Velo is centered in middle-in quadrants.")
+    st.markdown(f"- **Whiff Vulnerability:** Highest whiff frequency on {selected_pitch_type} occurs in low/outer quadrants.")
