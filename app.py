@@ -146,6 +146,20 @@ else:
     pitch_types = ["All Pitches"] + list(df_hitter["PitchType"].unique())
     selected_pitch_type = st.selectbox("Filter Strike Zone Heatmap by Pitch Type", options=pitch_types)
 
+    #pitch type colors
+    color_mapping = {
+        "All Pitches": "gray",
+        "Fastball": "red",
+        "Slider": "orange",
+        "Changeup": "green",
+        "Curveball": "blue",
+        "Cutter": "#933F2C"
+    }
+
+    #default color of pitch type
+    badge_color = color_mapping.get(selected_pitch_type, "gray")
+    st.markdown(f"**Viewing:** :{badge_color}-background[{selected_pitch_type}]")
+
     if selected_pitch_type != "All Pitches":
         df_hitter_filtered = df_hitter[df_hitter["PitchType"] == selected_pitch_type]
     else:
