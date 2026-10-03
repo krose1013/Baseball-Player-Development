@@ -30,7 +30,6 @@ selected_abbr = [k for k, v in team_map.items() if v == selected_team_name][0]
 # Fetch player roster for selected team based on position role
 all_players = get_players_for_team(selected_abbr)
 position_filter = st.sidebar.radio("Filter Roster By Role", ["All Players", "Pitchers Only", "Hitters Only"])
-selected_player = st.sidebar.selectbox("Select Player", options=available_players)
 
 # Classify players based on role selection
 if position_filter == "Pitchers Only":
