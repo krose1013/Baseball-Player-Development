@@ -4,6 +4,7 @@ import streamlit as st
 import requests
 
 @st.cache_data(ttl=86400)
+#Get list of MLB teams
 def get_mlb_teams():
     """Returns official MLB teams and abbreviations."""
     teams = {
@@ -21,6 +22,7 @@ def get_mlb_teams():
     return sorted(list(teams.values())), teams
 
 @st.cache_data(ttl=3600)
+#Get MLB rosters
 def get_players_for_team(team_abbr):
     """Pulls full live roster directly from MLB's official free public API."""
     # Official MLB Team ID Mapping
@@ -39,44 +41,86 @@ def get_players_for_team(team_abbr):
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            players = [p['person']['fullName'] for p in data.get('roster', [])]
-            return sorted(players) if players else ["Player Roster Empty"]
+            roster_list = []
+            
+            # Parse player info and determine if player is a pitcher (position code '1')
+            for p in data.get('roster', []):
+                name = p['person']['fullName']
+                pos_code = p.get('position', {}).get('code', '')
+                is_pitcher = pos_code == '1' or p.get('position', {}).get('type') == 'Pitcher'
+                
+                roster_list.append({
+                    "name": name,
+                    "is_pitcher": is_pitcher
+                })
+            return roster_list if roster_list else [{"name": "Aaron Judge", "is_pitcher": False}]
     except Exception:
-        pass
+        pass  # Gracefully fall through to static fallback roster on network error
     
-    return ["Aaron Judge", "Juan Soto", "Gerrit Cole"]
+    # Static fallback roster if API connection fails
+    return [
+        {"name": "Gerrit Cole", "is_pitcher": True},
+        {"name": "Carlos Rodon", "is_pitcher": True},
+        {"name": "Aaron Judge", "is_pitcher": False},
+        {"name": "Giancarlo Stanton", "is_pitcher": False},
+        {"name": "Juan Soto", "is_pitcher": False}
+    ]
+################################
+#Pitch tracking data (pitchers)
+################################
 
 def generate_pitcher_data(player_name, num_pitches=250):
+
+    # Ensure player_name is a string if a dict was passed by mistake
+    if isinstance(player_name, dict):
+        player_name = player_name.get("name", "Unknown Player")
+    elif not isinstance(player_name, str):
+        player_name = str(player_name)
+
+    # Determine seed generation based on player name ASCII values
     seed_val = sum(ord(c) for c in player_name)
     np.random.seed(seed_val)
     
     pitch_types = ['4-Seam', 'Sinker', 'Slider', 'Changeup']
     data = []
+
+    # Module check determines if this player simulates a 'Dead Zone' fastball profile
     is_dead_zone_pitcher = (seed_val % 2 == 0)
     
     for _ in range(num_pitches):
         p_type = np.random.choice(pitch_types, p=[0.45, 0.20, 0.20, 0.15])
-        
+        #Initialize default velocity as a safety fallback
+        velo = 90.0
+        # Pitch Profile & Velocity Assignments
+
         if p_type == '4-Seam':
             ivb = np.random.normal(8.5, 2.0) if is_dead_zone_pitcher else np.random.normal(17.0, 2.0)
             hb = np.random.normal(-1.0, 1.5) if is_dead_zone_pitcher else np.random.normal(-7.0, 2.0)
             spin = np.random.normal(2250, 90)
+            velo = np.random.normal(95.0, 1.5)
+            
         elif p_type == 'Sinker':
             ivb = np.random.normal(5.0, 2.0)
             hb = np.random.normal(-14.0, 2.0)
             spin = np.random.normal(2050, 100)
+            velo = np.random.normal(93.5, 1.5)
+            
         elif p_type == 'Slider':
             ivb = np.random.normal(1.0, 2.0)
             hb = np.random.normal(6.5, 2.0)
             spin = np.random.normal(2450, 110)
-        else:
+            velo = np.random.normal(85.0, 1.8)
+            
+        else:  # Changeup
             ivb = np.random.normal(4.0, 2.0)
             hb = np.random.normal(-11.5, 2.0)
             spin = np.random.normal(1650, 85)
+            velo = np.random.normal(86.0, 1.5)
 
         data.append({
             'Player': player_name,
             'PitchType': p_type,
+            'Velocity': np.round(velo, 1),
             'RelHeight': np.round(np.random.normal(5.85, 0.15), 2),
             'Extension': np.round(np.random.normal(6.3, 0.25), 2),
             'InducedVertBreak': np.round(ivb, 1),
@@ -84,9 +128,17 @@ def generate_pitcher_data(player_name, num_pitches=250):
             'SpinRate': int(spin)
         })
     return pd.DataFrame(data)
-#Generate hitting data
+
+##################################################
+#Generate Swing Decision & Contact Data (Hitters)
+##################################################
+
 def generate_hitter_data(player_name, num_pitches=250):
-    np.random.seed(hash(player_name) % 1000)
+    if isinstance(player_name, dict):
+            player_name = player_name.get("name", "Unknown Player")
+    elif not isinstance(player_name, str):
+            player_name = str(player_name)
+    np.random.seed(abs(hash(player_name)) % 1000)  
     
     zones = list(range(1, 10)) + [11, 12, 13, 14]  # 1-9 in-zone, 11-14 chase
     pitch_types = ["4-Seam", "Sinker", "Slider", "Changeup", "Sweeper", "Curveball"]
@@ -95,20 +147,39 @@ def generate_hitter_data(player_name, num_pitches=250):
     for _ in range(num_pitches):
         zone = np.random.choice(zones, p=[0.08]*9 + [0.07]*4)
         pitch_type = np.random.choice(pitch_types)
+
+        is_in_zone = zone in range(1, 10)
+        is_high = zone in [1, 2, 3]
+        is_low = zone in [7, 8, 9]
         
-        # Determine swing/whiff/contact
-        is_swing = np.random.choice([True, False], p=[0.55, 0.45]) if zone in range(1, 10) else np.random.choice([True, False], p=[0.25, 0.75])
-        
+        # In-zone swing frequency (~72%) vs Out-of-zone chase frequency (~26%)
+        is_swing = np.random.choice([True, False], p=[0.72, 0.28]) if is_in_zone else np.random.choice([True, False], p=[0.26, 0.74])
         is_whiff = False
         exit_velo = np.nan
         launch_angle = np.nan
         is_hard_hit = False
         
         if is_swing:
-            is_whiff = np.random.choice([True, False], p=[0.22, 0.78])
-            if not is_whiff:  # Contact made
-                exit_velo = np.round(np.random.normal(88.5, 8.0), 1)
-                launch_angle = np.round(np.random.normal(14.0, 12.0), 1)
+            # Base whiff probability elevated for breaking pitches low or fastballs high
+            whiff_p = 0.18 if is_in_zone else 0.46
+            if pitch_type in ["Sweeper", "Slider"] and is_low:
+                whiff_p += 0.15
+            elif pitch_type == "4-Seam" and is_high:
+                whiff_p += 0.12
+                
+            is_whiff = np.random.rand() < min(whiff_p, 0.80)
+            
+            # Generate contact metrics if the hitter swung and did not whiff
+            if not is_whiff:
+                ev_mean = 92.0 if is_in_zone else 83.0
+                
+                # High pitch zones produce higher launch angles (fly-balls); low zones produce lower (ground-balls)
+                la_mean = 22.0 if is_high else (4.0 if is_low else 14.0)
+                
+                exit_velo = np.round(np.random.normal(ev_mean, 7.5), 1)
+                launch_angle = np.round(np.random.normal(la_mean, 10.0), 1)
+                
+                # Hard-hit contact benchmark is 95+ mph Exit Velocity
                 is_hard_hit = exit_velo >= 95.0
                 
         data.append({
